@@ -3,6 +3,7 @@ import Foundation
 @testable import MuesliCore
 @testable import MuesliNativeApp
 
+@Suite
 struct Qwen3VendorTests {
 
     @available(macOS 15, *)
@@ -23,6 +24,7 @@ struct Qwen3VendorTests {
     }
 }
 
+@Suite
 struct Qwen3LanguageTests {
 
     @Test("Language init parses ISO codes and English names")
@@ -41,6 +43,7 @@ struct Qwen3LanguageTests {
     }
 }
 
+@Suite
 struct Qwen3LanguageSelectionTests {
 
     @available(macOS 15, *)

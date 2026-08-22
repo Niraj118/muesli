@@ -74,6 +74,9 @@ case "${shard}" in
       DictationStateIdleTests
       DictationCorrectionMonitorTests
       Nemotron35ModelStoreTests
+      Qwen3VendorTests
+      Qwen3LanguageTests
+      Qwen3LanguageSelectionTests
     )
     ;;
   meetings)
