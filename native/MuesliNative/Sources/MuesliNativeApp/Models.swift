@@ -409,13 +409,7 @@ enum Qwen3AsrLanguage: Hashable, Sendable {
     static var defaultLanguage: Self { systemLanguage }
 
     /// The Mac's current language when Qwen3-ASR supports it, English otherwise.
-    static let systemLanguage: Self = {
-        if let code = Locale.current.language.languageCode?.identifier,
-           let language = MuesliQwen3AsrConfig.Language(rawValue: code.lowercased()) {
-            return .pinned(language)
-        }
-        return .pinned(.english)
-    }()
+    static let systemLanguage: Self = .pinned(MuesliQwen3AsrSystemLanguage.current)
 
     static var allCases: [Qwen3AsrLanguage] {
         [.auto] + MuesliQwen3AsrConfig.Language.allCases.map(Qwen3AsrLanguage.pinned)
