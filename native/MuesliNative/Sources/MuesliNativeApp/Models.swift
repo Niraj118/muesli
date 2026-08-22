@@ -1284,6 +1284,10 @@ struct AppConfig: Codable {
     var dictationHotkey: HotkeyConfig = .default
     var computerUseHotkey: HotkeyConfig = .computerUseDefault
     var enableComputerUseHotkey: Bool = false
+    /// Tapped while the push-to-talk key is held to switch that press into a
+    /// hands-free session. Sharing the push-to-talk key is deliberate: two
+    /// independent shortcuts over the same modifier fight each other.
+    var handsFreeKeyCode: UInt16 = 49
     var meetingRecordingHotkey: HotkeyConfig = .meetingRecordingDefault
     var enableMeetingRecordingHotkey: Bool = false
     var computerUseHotkeyDefaultDisabledMigrationApplied: Bool = true
@@ -1411,6 +1415,7 @@ struct AppConfig: Codable {
         case dictationHotkey = "dictation_hotkey"
         case computerUseHotkey = "computer_use_hotkey"
         case enableComputerUseHotkey = "enable_computer_use_hotkey"
+        case handsFreeKeyCode = "hands_free_key_code"
         case meetingRecordingHotkey = "meeting_recording_hotkey"
         case enableMeetingRecordingHotkey = "enable_meeting_recording_hotkey"
         case computerUseHotkeyDefaultDisabledMigrationApplied = "computer_use_hotkey_default_disabled_migration_applied"
@@ -1543,6 +1548,7 @@ struct AppConfig: Codable {
             ? ((try? c.decode(Bool.self, forKey: .enableComputerUseHotkey)) ?? defaults.enableComputerUseHotkey)
             : false
         computerUseHotkeyDefaultDisabledMigrationApplied = true
+        handsFreeKeyCode = (try? c.decode(UInt16.self, forKey: .handsFreeKeyCode)) ?? defaults.handsFreeKeyCode
         meetingRecordingHotkey = (try? c.decode(HotkeyConfig.self, forKey: .meetingRecordingHotkey)) ?? defaults.meetingRecordingHotkey
         enableMeetingRecordingHotkey = (try? c.decode(Bool.self, forKey: .enableMeetingRecordingHotkey)) ?? defaults.enableMeetingRecordingHotkey
         enableComputerUsePlanner = (try? c.decode(Bool.self, forKey: .enableComputerUsePlanner)) ?? defaults.enableComputerUsePlanner

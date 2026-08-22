@@ -10,6 +10,7 @@ struct ShortcutsView: View {
     @State private var pendingModifierKeyCode: UInt16?
     @State private var dictationShortcutMessage: String?
     @State private var computerUseShortcutMessage: String?
+    @State private var handsFreeShortcutMessage: String?
     @State private var meetingRecordingShortcutMessage: String?
 
     var body: some View {
@@ -24,6 +25,8 @@ struct ShortcutsView: View {
                     .foregroundStyle(MuesliTheme.textSecondary)
 
                 dictationShortcutSection
+
+                handsFreeShortcutSection
 
                 computerUseShortcutSection
 
@@ -45,6 +48,7 @@ struct ShortcutsView: View {
 
     private enum ShortcutTarget {
         case dictation
+        case handsFree
         case computerUse
         case meetingRecording
     }
@@ -76,6 +80,43 @@ struct ShortcutsView: View {
 
             if let dictationShortcutMessage {
                 shortcutMessage(dictationShortcutMessage)
+            }
+        }
+        .padding(MuesliTheme.spacing16)
+        .background(MuesliTheme.backgroundRaised)
+        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium))
+        .overlay(
+            RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium)
+                .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
+        )
+    }
+
+    private var handsFreeShortcutSection: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+                    Text("Hands-Free Shortcut")
+                        .font(MuesliTheme.headline())
+                        .foregroundStyle(MuesliTheme.textPrimary)
+                    Text("Tap while holding push to talk. Press push to talk or Return to transcribe, Escape to cancel")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                }
+                Spacer()
+                handsFreeBadge
+            }
+
+            Divider()
+                .background(MuesliTheme.surfaceBorder)
+
+            HStack(spacing: MuesliTheme.spacing12) {
+                handsFreeBadge
+                changeButton(for: .handsFree)
+                Spacer(minLength: MuesliTheme.spacing16)
+            }
+
+            if let handsFreeShortcutMessage {
+                shortcutMessage(handsFreeShortcutMessage)
             }
         }
         .padding(MuesliTheme.spacing16)
@@ -192,6 +233,21 @@ struct ShortcutsView: View {
         )
     }
 
+    private var handsFreeBadge: some View {
+        let key = HotkeyConfig.combinationKeyLabel(for: appState.config.handsFreeKeyCode) ?? "?"
+        return Text("\(appState.config.dictationHotkey.displayLabel) \(key)")
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .foregroundStyle(MuesliTheme.textPrimary)
+            .padding(.horizontal, MuesliTheme.spacing12)
+            .padding(.vertical, MuesliTheme.spacing4)
+            .background(MuesliTheme.surfacePrimary)
+            .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+            .overlay(
+                RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall)
+                    .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
+            )
+    }
+
     private func hotkeyBadge(_ hotkey: HotkeyConfig) -> some View {
         Text(hotkey.displayLabel)
             .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -236,6 +292,8 @@ struct ShortcutsView: View {
             return appState.config.computerUseHotkey
         case .meetingRecording:
             return appState.config.meetingRecordingHotkey
+        case .handsFree:
+            return appState.config.dictationHotkey
         }
     }
 
@@ -305,9 +363,13 @@ struct ShortcutsView: View {
 
     private func recordingPrompt(for target: ShortcutTarget) -> String {
         switch target {
+        case .handsFree:
+            return "Press a key..."
         case .meetingRecording:
             return "Press a key or modifier..."
-        case .dictation, .computerUse:
+        case .dictation:
+            return "Press a modifier key, or hold one and press a key..."
+        case .computerUse:
             return "Press a modifier key..."
         }
     }
@@ -379,6 +441,14 @@ struct ShortcutsView: View {
                     stopRecording()
                     return nil
                 }
+                if target == .handsFree {
+                    guard HotkeyConfig.combinationKeyLabel(for: event.keyCode) != nil else {
+                        return event
+                    }
+                    pendingModifierKeyCode = nil
+                    commitHandsFreeKey(event.keyCode)
+                    return nil
+                }
                 let mods = HotkeyConfig.supportedCombinationModifiers(from: event.modifierFlags)
                 let hasModifiers = mods.contains(.command) || mods.contains(.control)
                     || mods.contains(.option) || mods.contains(.function)
@@ -416,6 +486,12 @@ struct ShortcutsView: View {
         }
     }
 
+    private func commitHandsFreeKey(_ keyCode: UInt16) {
+        let result = controller.updateHandsFreeKeyCode(keyCode)
+        setShortcutMessage(result.message, for: .handsFree)
+        stopRecording()
+    }
+
     private func commitShortcut(_ config: HotkeyConfig, for target: ShortcutTarget) {
         let result: ShortcutHotkeyUpdateResult
         switch target {
@@ -425,6 +501,9 @@ struct ShortcutsView: View {
             result = controller.updateComputerUseHotkey(config)
         case .meetingRecording:
             result = controller.updateMeetingRecordingHotkey(config)
+        case .handsFree:
+            // Recorded through commitHandsFreeKey; it has no HotkeyConfig.
+            return
         }
         setShortcutMessage(result.message, for: target)
         stopRecording()
@@ -436,6 +515,8 @@ struct ShortcutsView: View {
 
     private func setShortcutMessage(_ message: String?, for target: ShortcutTarget) {
         switch target {
+        case .handsFree:
+            handsFreeShortcutMessage = message
         case .dictation:
             dictationShortcutMessage = message
             if message == nil { computerUseShortcutMessage = nil; meetingRecordingShortcutMessage = nil }

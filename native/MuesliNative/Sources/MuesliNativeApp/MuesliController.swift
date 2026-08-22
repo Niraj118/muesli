@@ -638,6 +638,7 @@ public final class MuesliController: NSObject {
         hotkeyMonitor.onToggleStop = { [weak self] in self?.handleToggleStop() }
         hotkeyMonitor.doubleTapEnabled = config.enableDoubleTapDictation
         hotkeyMonitor.combinationHoldToTalk = true
+        hotkeyMonitor.handsFreeKeyCode = config.handsFreeKeyCode
         configureHotkeyMonitorTiming()
         computerUseHotkeyMonitor.onPrepare = { [weak self] in self?.handleComputerUsePrepare() }
         computerUseHotkeyMonitor.onStart = { [weak self] in self?.handleComputerUseStart() }
@@ -3668,6 +3669,12 @@ public final class MuesliController: NSObject {
     }
 
     @discardableResult
+    func updateHandsFreeKeyCode(_ keyCode: UInt16) -> ShortcutHotkeyUpdateResult {
+        updateConfig { $0.handsFreeKeyCode = keyCode }
+        hotkeyMonitor.handsFreeKeyCode = keyCode
+        return .updated
+    }
+
     func updateMeetingRecordingHotkey(_ hotkey: HotkeyConfig) -> ShortcutHotkeyUpdateResult {
         let result = ShortcutHotkeyPolicy.validateMeetingRecordingHotkey(
             hotkey,
@@ -3707,6 +3714,7 @@ public final class MuesliController: NSObject {
     func resetShortcutDefaults() {
         updateConfig { config in
             config.dictationHotkey = .default
+            config.handsFreeKeyCode = AppConfig().handsFreeKeyCode
             config.computerUseHotkey = .computerUseDefault
             config.enableComputerUseHotkey = false
             config.meetingRecordingHotkey = .meetingRecordingDefault

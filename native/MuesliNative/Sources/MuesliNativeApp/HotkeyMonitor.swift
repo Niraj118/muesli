@@ -39,6 +39,10 @@ final class HotkeyMonitor {
     var combinationModifiers: NSEvent.ModifierFlags?
     var combinationKeyCode: UInt16?
 
+    /// Tapped while the target key is held, this switches the press into a
+    /// hands-free (toggle) session. nil disables the shortcut.
+    var handsFreeKeyCode: UInt16?
+
     /// Dictation combinations are push-to-talk: recording runs while both halves
     /// are held, matching the single-modifier hotkey. Meeting recording keeps the
     /// press-once-to-start, press-again-to-stop toggle.
@@ -604,7 +608,34 @@ final class HotkeyMonitor {
             return
         }
 
+        // Return / keypad Enter finishes a hands-free session, like releasing
+        // the key finishes a held one.
+        if toggleActive, keyCode == 36 || keyCode == 76 {
+            fputs("[hotkey] enter → toggle stop\n", stderr)
+            toggleActive = false
+            cancelTimers()
+            onToggleStop?()
+            return
+        }
+
         if targetKeyDown && !toggleActive {
+            // The hands-free key turns this press into a toggle session. Anything
+            // already recorded from the held key is discarded, not transcribed:
+            // the user asked for hands-free, not for what they said reaching for it.
+            if let handsFreeKeyCode, keyCode == handsFreeKeyCode {
+                let wasRecording = active
+                otherKeyPressed = true
+                lastTapWasShort = false
+                armed = false
+                active = false
+                prepared = false
+                cancelTimers()
+                if wasRecording { onCancel?() }
+                fputs("[hotkey] hands-free key → toggle start\n", stderr)
+                toggleActive = true
+                onToggleStart?()
+                return
+            }
             if keyCode != targetKeyCode {
                 fputs("[hotkey] canceled by other key\n", stderr)
                 otherKeyPressed = true
