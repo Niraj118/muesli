@@ -402,7 +402,20 @@ enum Qwen3AsrLanguage: Hashable, Sendable {
     case auto
     case pinned(MuesliQwen3AsrConfig.Language)
 
-    static let defaultLanguage: Self = .auto
+    /// Qwen3-ASR is never asked to transcribe without a language instruction:
+    /// given an empty one it chooses a language itself and drifts to Chinese on
+    /// English speech. Default to the Mac's own language instead, and keep
+    /// `auto` for people who pick it deliberately.
+    static var defaultLanguage: Self { systemLanguage }
+
+    /// The Mac's current language when Qwen3-ASR supports it, English otherwise.
+    static let systemLanguage: Self = {
+        if let code = Locale.current.language.languageCode?.identifier,
+           let language = MuesliQwen3AsrConfig.Language(rawValue: code.lowercased()) {
+            return .pinned(language)
+        }
+        return .pinned(.english)
+    }()
 
     static var allCases: [Qwen3AsrLanguage] {
         [.auto] + MuesliQwen3AsrConfig.Language.allCases.map(Qwen3AsrLanguage.pinned)
@@ -432,8 +445,11 @@ enum Qwen3AsrLanguage: Hashable, Sendable {
 
     static func resolved(_ rawValue: String?) -> Self {
         let normalized = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard let normalized, !normalized.isEmpty, normalized != "auto" else {
+        guard let normalized, !normalized.isEmpty else {
             return defaultLanguage
+        }
+        if normalized == "auto" {
+            return .auto
         }
         if let language = MuesliQwen3AsrConfig.Language(rawValue: normalized) {
             return .pinned(language)

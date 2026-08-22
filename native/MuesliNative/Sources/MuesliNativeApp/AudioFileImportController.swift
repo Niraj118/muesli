@@ -190,6 +190,7 @@ enum AudioFileImportController {
             cohereLanguage: config.resolvedCohereLanguage,
             indicASRLanguage: config.resolvedIndicASRLanguage,
             whisperLanguage: config.resolvedWhisperLanguage,
+            qwen3AsrLanguage: config.resolvedQwen3AsrLanguage,
             appleSpeechLanguage: config.resolvedAppleSpeechLanguage
         )
         let rawTranscript = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
