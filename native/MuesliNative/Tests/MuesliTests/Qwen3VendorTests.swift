@@ -46,13 +46,23 @@ struct Qwen3LanguageSelectionTests {
     @available(macOS 15, *)
     @Test("Qwen3AsrLanguage resolves auto and pinned languages")
     func resolvesAutoAndPinned() {
-        #expect(Qwen3AsrLanguage.resolved(nil) == .auto)
-        #expect(Qwen3AsrLanguage.resolved("") == .auto)
         #expect(Qwen3AsrLanguage.resolved("auto") == .auto)
         #expect(Qwen3AsrLanguage.resolved("AUTO") == .auto)
         #expect(Qwen3AsrLanguage.resolved("en") == .pinned(.english))
         #expect(Qwen3AsrLanguage.resolved("English") == .pinned(.english))
-        #expect(Qwen3AsrLanguage.resolved("bogus") == .auto)
+    }
+
+    /// Nothing may resolve to `auto` by accident: an empty language instruction
+    /// lets Qwen3-ASR answer in Chinese when the speaker is talking English.
+    @available(macOS 15, *)
+    @Test("Qwen3AsrLanguage falls back to a real language, never auto")
+    func fallsBackToSystemLanguage() {
+        #expect(Qwen3AsrLanguage.resolved(nil) == Qwen3AsrLanguage.systemLanguage)
+        #expect(Qwen3AsrLanguage.resolved("") == Qwen3AsrLanguage.systemLanguage)
+        #expect(Qwen3AsrLanguage.resolved("bogus") == Qwen3AsrLanguage.systemLanguage)
+        #expect(Qwen3AsrLanguage.systemLanguage != .auto)
+        #expect(Qwen3AsrLanguage.systemLanguage.pinnedCode != nil)
+        #expect(Qwen3AsrLanguage.defaultLanguage == Qwen3AsrLanguage.systemLanguage)
     }
 
     @available(macOS 15, *)
