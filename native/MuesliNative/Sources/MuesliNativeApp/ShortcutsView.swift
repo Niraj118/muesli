@@ -381,10 +381,10 @@ struct ShortcutsView: View {
                 }
                 let mods = HotkeyConfig.supportedCombinationModifiers(from: event.modifierFlags)
                 let hasModifiers = mods.contains(.command) || mods.contains(.control)
-                    || mods.contains(.option)
-                guard target == .meetingRecording,
+                    || mods.contains(.option) || mods.contains(.function)
+                guard target != .computerUse,
                       hasModifiers,
-                      HotkeyConfig.letterLabel(for: event.keyCode) != nil else {
+                      HotkeyConfig.combinationKeyLabel(for: event.keyCode) != nil else {
                     return event
                 }
                 pendingModifierKeyCode = nil
@@ -402,6 +402,7 @@ struct ShortcutsView: View {
             case 56, 60: isDown = flags.contains(.shift)
             case 58, 61: isDown = flags.contains(.option)
             case 59, 62: isDown = flags.contains(.control)
+            case 63: isDown = flags.contains(.function)
             default: isDown = false
             }
             if isDown {

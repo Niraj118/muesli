@@ -1189,15 +1189,27 @@ struct HotkeyConfig: Codable, Equatable {
         return letters[keyCode]
     }
 
+    /// Keys usable as the non-modifier half of a combination.
+    static func combinationKeyLabel(for keyCode: UInt16) -> String? {
+        if let letter = letterLabel(for: keyCode) { return letter }
+        return keyCode == 49 ? "Space" : nil
+    }
+
     static func combinationLabel(modifiers: NSEvent.ModifierFlags, keyCode: UInt16) -> String {
         let modifiers = supportedCombinationModifiers(from: modifiers)
         var parts: [String] = []
+        if modifiers.contains(.function) { parts.append("fn") }
         if modifiers.contains(.command) { parts.append("⌘") }
         if modifiers.contains(.control) { parts.append("⌃") }
         if modifiers.contains(.option) { parts.append("⌥") }
         if modifiers.contains(.shift) { parts.append("⇧") }
-        parts.append(letterLabel(for: keyCode) ?? "?")
-        return parts.joined()
+        let key = combinationKeyLabel(for: keyCode) ?? "?"
+        let prefix = parts.joined()
+        // Word-shaped names ("fn", "Space") need a gap; symbol runs like ⌘⇧R do not.
+        if !prefix.isEmpty, prefix.last?.isLetter == true || key.count > 1 {
+            return prefix + " " + key
+        }
+        return prefix + key
     }
 
     static func combination(modifiers: NSEvent.ModifierFlags, keyCode: UInt16) -> HotkeyConfig {
@@ -1212,7 +1224,7 @@ struct HotkeyConfig: Codable, Equatable {
     }
 
     static func supportedCombinationModifiers(from modifiers: NSEvent.ModifierFlags) -> NSEvent.ModifierFlags {
-        modifiers.intersection([.command, .control, .option, .shift])
+        modifiers.intersection([.command, .control, .option, .shift, .function])
     }
 
     var resolvedCombinationModifiers: NSEvent.ModifierFlags? {

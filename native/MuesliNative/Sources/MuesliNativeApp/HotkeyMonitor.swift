@@ -39,6 +39,11 @@ final class HotkeyMonitor {
     var combinationModifiers: NSEvent.ModifierFlags?
     var combinationKeyCode: UInt16?
 
+    /// Dictation combinations are push-to-talk: recording runs while both halves
+    /// are held, matching the single-modifier hotkey. Meeting recording keeps the
+    /// press-once-to-start, press-again-to-stop toggle.
+    var combinationHoldToTalk: Bool = false
+
     var isCombinationMode: Bool {
         combinationModifiers != nil && combinationKeyCode != nil
     }
@@ -287,6 +292,11 @@ final class HotkeyMonitor {
                 onCancel?()
                 return true
             }
+            if combinationHoldToTalk, targetKeyDown || active || prepared || armed {
+                fputs("[hotkey] escape → cancel held combination\n", stderr)
+                releaseHeldCombination(stopping: false)
+                return true
+            }
             if combinationKeyDown {
                 cancelCombinationPending(notify: true)
                 return true
@@ -296,6 +306,17 @@ final class HotkeyMonitor {
 
         guard let targetMods = combinationModifiers,
               let targetKey = combinationKeyCode else { return false }
+
+        if combinationHoldToTalk {
+            return handleHeldCombination(
+                type: type,
+                keyCode: keyCode,
+                flags: flags,
+                isRepeat: isRepeat,
+                targetMods: targetMods,
+                targetKey: targetKey
+            )
+        }
 
         if type == .flagsChanged, combinationKeyDown,
            HotkeyConfig.supportedCombinationModifiers(from: flags) != targetMods {
@@ -327,6 +348,67 @@ final class HotkeyMonitor {
         scheduleAfter(startDelay, item)
         fputs("[hotkey] combination armed\n", stderr)
         return true
+    }
+
+    /// Push-to-talk for a two-key hotkey. Reuses the single-key arm/prepare/start
+    /// timers by treating "both halves held" as the target key being down, so the
+    /// recording lifecycle is identical to holding one modifier.
+    @discardableResult
+    private func handleHeldCombination(
+        type: NSEvent.EventType,
+        keyCode: UInt16,
+        flags: NSEvent.ModifierFlags,
+        isRepeat: Bool,
+        targetMods: NSEvent.ModifierFlags,
+        targetKey: UInt16
+    ) -> Bool {
+        let modifiersHeld = HotkeyConfig.supportedCombinationModifiers(from: flags) == targetMods
+
+        if type == .keyDown, keyCode == targetKey, modifiersHeld {
+            if isRepeat || targetKeyDown { return true }
+            combinationKeyDown = true
+            targetKeyDown = true
+            otherKeyPressed = false
+            prepared = false
+            if let onArm {
+                armed = true
+                onArm()
+            }
+            fputs("[hotkey] combination held\n", stderr)
+            scheduleTimers()
+            return true
+        }
+
+        guard targetKeyDown else { return false }
+
+        // Letting go of either half ends the session.
+        let releasedKey = type == .keyUp && keyCode == targetKey
+        let releasedModifiers = type == .flagsChanged && !modifiersHeld
+        guard releasedKey || releasedModifiers else { return false }
+
+        fputs("[hotkey] combination released\n", stderr)
+        releaseHeldCombination(stopping: true)
+        return true
+    }
+
+    /// `stopping: false` discards instead of transcribing (Escape).
+    private func releaseHeldCombination(stopping: Bool) {
+        let wasArmed = armed
+        let wasActive = active
+        let wasPrepared = prepared
+        combinationKeyDown = false
+        combinationTriggered = false
+        targetKeyDown = false
+        armed = false
+        active = false
+        prepared = false
+        cancelTimers()
+
+        if wasActive {
+            if stopping { onStop?() } else { onCancel?() }
+        } else if wasPrepared || wasArmed {
+            onCancel?()
+        }
     }
 
     private func fireCombinationToggle() {
