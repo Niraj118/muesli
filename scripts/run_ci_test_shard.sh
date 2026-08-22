@@ -77,6 +77,7 @@ case "${shard}" in
       Qwen3VendorTests
       Qwen3LanguageTests
       Qwen3LanguageSelectionTests
+      Qwen3AudioSegmenterTests
     )
     ;;
   meetings)

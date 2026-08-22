@@ -128,7 +128,19 @@ actor Qwen3AsrTranscriber {
         let start = CFAbsoluteTimeGetCurrent()
         let converter = AudioConverter()
         let samples = try converter.resampleAudioFile(wavURL)
-        let text = try await manager.transcribe(audioSamples: samples, language: language)
+        // Qwen3 refuses audio past its ~30s window, so anything longer is
+        // transcribed in pieces and rejoined instead of failing outright.
+        let segments = MuesliQwen3AudioSegmenter.segments(samples)
+        if segments.count > 1 {
+            fputs("[qwen3-asr] long recording split into \(segments.count) segments\n", stderr)
+        }
+        var parts: [String] = []
+        for segment in segments {
+            let part = try await manager.transcribe(audioSamples: segment, language: language)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !part.isEmpty { parts.append(part) }
+        }
+        let text = parts.joined(separator: " ")
         let processingTime = CFAbsoluteTimeGetCurrent() - start
         return (text, processingTime)
     }

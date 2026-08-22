@@ -761,10 +761,15 @@ actor Qwen3AsrCLITranscriber: AudioTranscribing {
         guard let qwen3Manager = manager as? MuesliQwen3AsrManager else {
             throw CLIError.invalidInput("Qwen3 ASR model was not loaded.", fix: "Run the command again after the model finishes downloading.")
         }
-        let text = try await qwen3Manager.transcribe(
-            audioSamples: samples,
-            language: MuesliQwen3AsrSystemLanguage.current
-        )
+        var parts: [String] = []
+        for segment in MuesliQwen3AudioSegmenter.segments(samples) {
+            let part = try await qwen3Manager.transcribe(
+                audioSamples: segment,
+                language: MuesliQwen3AsrSystemLanguage.current
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !part.isEmpty { parts.append(part) }
+        }
+        let text = parts.joined(separator: " ")
         progress("transcription complete in \(String(format: "%.2f", CFAbsoluteTimeGetCurrent() - start))s")
         return HeadlessTranscription(text: text, durationSeconds: nil)
     }
