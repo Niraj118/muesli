@@ -57,6 +57,8 @@ case "${shard}" in
       Nemotron35BackendMetadataTests
       Nemotron35LanguageTests
       WhisperKitLanguageTests
+      SpeechRegionTrimmerTests
+      WhisperSilenceHallucinationFilterTests
       SpeechSegmentTests
       SpeechTranscriptionResultTests
       TranscriptionCoordinatorTests

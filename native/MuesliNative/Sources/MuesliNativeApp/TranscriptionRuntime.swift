@@ -480,6 +480,9 @@ actor TranscriptionCoordinator {
                 progressSnapshot: progressSnapshot
             )
         case "whisper":
+            // Whisper dictation needs the VAD too, and dictation-only setups do not
+            // preload the meeting helpers that normally bring it in.
+            await preloadVoiceActivityDetector()
             try await whisperTranscriber.loadModel(
                 modelName: backend.model,
                 progress: progress,
@@ -571,16 +574,18 @@ actor TranscriptionCoordinator {
     }
 
     func preloadMeetingHelpers(trigger: DiarizerPreloadTrigger = .unspecified) async {
-        if vadManager == nil {
-            do {
-                vadManager = try await vadLoader()
-                fputs("[muesli-native] Silero VAD loaded\n", stderr)
-            } catch {
-                fputs("[muesli-native] VAD load failed (non-critical): \(error)\n", stderr)
-            }
-        }
-
+        await preloadVoiceActivityDetector()
         await preloadDiarizer(trigger: trigger)
+    }
+
+    func preloadVoiceActivityDetector() async {
+        guard vadManager == nil else { return }
+        do {
+            vadManager = try await vadLoader()
+            fputs("[muesli-native] Silero VAD loaded\n", stderr)
+        } catch {
+            fputs("[muesli-native] VAD load failed (non-critical): \(error)\n", stderr)
+        }
     }
 
     func preloadDiarizer(
@@ -1324,13 +1329,48 @@ actor TranscriptionCoordinator {
         language: WhisperKitLanguage
     ) async throws -> SpeechTranscriptionResult {
         fputs("[muesli-native] transcribing with WhisperKit: \(url.lastPathComponent)\n", stderr)
-        let result = try await whisperTranscriber.transcribe(wavURL: url, language: language)
+        let result: (text: String, processingTime: Double)
+        if let speech = await speechOnlyAudioForWhisper(url: url) {
+            guard let samples = speech.samples else {
+                fputs("[muesli-native] VAD: recording has no speech, skipping WhisperKit\n", stderr)
+                return SpeechTranscriptionResult(text: "", segments: [])
+            }
+            result = try await whisperTranscriber.transcribe(samples: samples, language: language)
+        } else {
+            result = try await whisperTranscriber.transcribe(wavURL: url, language: language)
+        }
         fputs("[muesli-native] WhisperKit result: \(result.text.prefix(80)) (took \(String(format: "%.3f", result.processingTime))s)\n", stderr)
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         return SpeechTranscriptionResult(
             text: text,
             segments: text.isEmpty ? [] : [SpeechSegment(start: 0, end: 0, text: text)]
         )
+    }
+
+    /// Cut the recording down to speech before Whisper sees it. Whisper invents
+    /// sentences ("Thank you.") for silent windows, so silence never reaches it.
+    /// Returns nil when the VAD is unavailable or fails, in which case the caller
+    /// transcribes the file as recorded.
+    private func speechOnlyAudioForWhisper(url: URL) async -> SpeechRegionTrimmer.Result? {
+        guard let vadManager else {
+            fputs("[muesli-native] VAD unavailable, WhisperKit will see the full recording\n", stderr)
+            return nil
+        }
+        do {
+            let samples = try AudioConverter().resampleAudioFile(url)
+            let probabilities = try await vadManager.process(samples).map(\.probability)
+            let trimmed = SpeechRegionTrimmer.trim(
+                samples: samples,
+                chunkProbabilities: probabilities,
+                chunkSize: VadManager.chunkSize,
+                sampleRate: VadManager.sampleRate
+            )
+            fputs("[muesli-native] VAD: kept \(trimmed.regions.count) speech region(s), removed \(String(format: "%.1f", trimmed.removedDuration))s of silence\n", stderr)
+            return trimmed
+        } catch {
+            fputs("[muesli-native] VAD trim failed, WhisperKit will see the full recording: \(error)\n", stderr)
+            return nil
+        }
     }
 
     // MARK: - Qwen3 ASR (Autoregressive CoreML on ANE)
