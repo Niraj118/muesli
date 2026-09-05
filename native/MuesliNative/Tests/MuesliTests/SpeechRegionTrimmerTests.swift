@@ -113,15 +113,17 @@ struct SpeechRegionTrimmerTests {
     func thresholdConfigurable() {
         var configuration = SpeechRegionTrimmer.Configuration.default
         configuration.speechThreshold = 0.7
+        // Padding (350ms) is longer than a chunk (256ms), so leave room before the
+        // speech chunk for it to land inside the recording.
         let regions = SpeechRegionTrimmer.speechRegions(
-            chunkProbabilities: [0.69, 0.7],
+            chunkProbabilities: [0, 0, 0.69, 0.7],
             chunkSize: chunk,
-            sampleCount: 2 * chunk,
+            sampleCount: 4 * chunk,
             sampleRate: rate,
             configuration: configuration
         )
         let padding = Int(0.35 * Double(rate))
-        #expect(regions == [.init(start: chunk - padding, end: 2 * chunk)])
+        #expect(regions == [.init(start: 3 * chunk - padding, end: 4 * chunk)])
     }
 
     @Test("degenerate inputs produce nothing")
