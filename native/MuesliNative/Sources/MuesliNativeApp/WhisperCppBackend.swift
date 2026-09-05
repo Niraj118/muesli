@@ -69,11 +69,29 @@ actor WhisperKitTranscriber {
         let start = CFAbsoluteTimeGetCurrent()
         let decodeOptions = Self.makeDecodeOptions(language: language, modelName: loadedModel)
         let results = try await whisperKit.transcribe(audioPath: wavURL.path, decodeOptions: decodeOptions)
-        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        return (text: Self.assembleText(results), processingTime: CFAbsoluteTimeGetCurrent() - start)
+    }
 
-        let text = results.map(\.text).joined(separator: " ")
+    /// Transcribe 16kHz mono samples that have already been cut down to speech
+    /// (see `SpeechRegionTrimmer`), so Whisper never decodes a silent window.
+    func transcribe(
+        samples: [Float],
+        language: WhisperKitLanguage = .defaultLanguage
+    ) async throws -> (text: String, processingTime: Double) {
+        guard let whisperKit else { throw TranscriberError.notLoaded }
+        guard let loadedModel else { throw TranscriberError.notLoaded }
+
+        let start = CFAbsoluteTimeGetCurrent()
+        let decodeOptions = Self.makeDecodeOptions(language: language, modelName: loadedModel)
+        let results = try await whisperKit.transcribe(audioArray: samples, decodeOptions: decodeOptions)
+        return (text: Self.assembleText(results), processingTime: CFAbsoluteTimeGetCurrent() - start)
+    }
+
+    /// Join Whisper's windows and drop the stock sentences it emits for silence.
+    static func assembleText(_ results: [TranscriptionResult]) -> String {
+        let joined = results.map(\.text).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (text: text, processingTime: elapsed)
+        return WhisperSilenceHallucinationFilter.apply(joined)
     }
 
     /// Build WhisperKit decode options for the loaded model.

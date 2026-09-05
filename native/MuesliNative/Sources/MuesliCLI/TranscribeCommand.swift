@@ -761,7 +761,15 @@ actor Qwen3AsrCLITranscriber: AudioTranscribing {
         guard let qwen3Manager = manager as? MuesliQwen3AsrManager else {
             throw CLIError.invalidInput("Qwen3 ASR model was not loaded.", fix: "Run the command again after the model finishes downloading.")
         }
-        let text = try await qwen3Manager.transcribe(audioSamples: samples)
+        var parts: [String] = []
+        for segment in MuesliQwen3AudioSegmenter.segments(samples) {
+            let part = try await qwen3Manager.transcribe(
+                audioSamples: segment,
+                language: MuesliQwen3AsrSystemLanguage.current
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !part.isEmpty { parts.append(part) }
+        }
+        let text = parts.joined(separator: " ")
         progress("transcription complete in \(String(format: "%.2f", CFAbsoluteTimeGetCurrent() - start))s")
         return HeadlessTranscription(text: text, durationSeconds: nil)
     }
@@ -849,6 +857,8 @@ actor Nemotron35CLITranscriber: AudioTranscribing {
 actor WhisperCLITranscriber: AudioTranscribing {
     private var whisperKit: WhisperKit?
     private var loadedModel: String?
+    private var vadManager: VadManager?
+    private var vadUnavailable = false
 
     func transcribe(wavURL: URL, model: TranscribeModel, progress: @escaping (String) -> Void) async throws -> HeadlessTranscription {
         guard let modelName = model.whisperKitModelName else {
@@ -870,10 +880,52 @@ actor WhisperCLITranscriber: AudioTranscribing {
         } else {
             decodeOptions = DecodingOptions(detectLanguage: true)
         }
-        let results = try await whisperKit.transcribe(audioPath: wavURL.path, decodeOptions: decodeOptions)
-        let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let results: [TranscriptionResult]
+        if let speech = await speechOnlyAudio(wavURL: wavURL, progress: progress) {
+            guard let samples = speech.samples else {
+                progress("no speech detected; nothing to transcribe")
+                return HeadlessTranscription(text: "", durationSeconds: nil)
+            }
+            results = try await whisperKit.transcribe(audioArray: samples, decodeOptions: decodeOptions)
+        } else {
+            results = try await whisperKit.transcribe(audioPath: wavURL.path, decodeOptions: decodeOptions)
+        }
+        // Whisper invents "Thank you." for silent windows; the trim above removes
+        // the silence and this drops any stock sentence that still slips through.
+        let text = WhisperSilenceHallucinationFilter.apply(
+            results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         progress("transcription complete in \(String(format: "%.2f", CFAbsoluteTimeGetCurrent() - start))s")
         return HeadlessTranscription(text: text, durationSeconds: nil)
+    }
+
+    /// Cut the file down to speech with Silero VAD, as the app does for Whisper
+    /// dictation. Returns nil (transcribe the whole file) if the VAD cannot load.
+    private func speechOnlyAudio(wavURL: URL, progress: @escaping (String) -> Void) async -> SpeechRegionTrimmer.Result? {
+        if vadManager == nil, !vadUnavailable {
+            do {
+                vadManager = try await VadManager()
+            } catch {
+                vadUnavailable = true
+                progress("voice activity detector unavailable (\(error.localizedDescription)); transcribing the full file")
+            }
+        }
+        guard let vadManager else { return nil }
+        do {
+            let samples = try AudioConverter().resampleAudioFile(wavURL)
+            let probabilities = try await vadManager.process(samples).map(\.probability)
+            let trimmed = SpeechRegionTrimmer.trim(
+                samples: samples,
+                chunkProbabilities: probabilities,
+                chunkSize: VadManager.chunkSize,
+                sampleRate: VadManager.sampleRate
+            )
+            progress("kept \(trimmed.regions.count) speech region(s), removed \(String(format: "%.1f", trimmed.removedDuration))s of silence")
+            return trimmed
+        } catch {
+            progress("voice activity check failed (\(error.localizedDescription)); transcribing the full file")
+            return nil
+        }
     }
 
     private func load(modelName: String, progress: @escaping (String) -> Void) async throws {

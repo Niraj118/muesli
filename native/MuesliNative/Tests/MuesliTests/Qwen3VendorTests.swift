@@ -3,6 +3,7 @@ import Foundation
 @testable import MuesliCore
 @testable import MuesliNativeApp
 
+@Suite
 struct Qwen3VendorTests {
 
     @available(macOS 15, *)
@@ -23,6 +24,7 @@ struct Qwen3VendorTests {
     }
 }
 
+@Suite
 struct Qwen3LanguageTests {
 
     @Test("Language init parses ISO codes and English names")
@@ -41,6 +43,60 @@ struct Qwen3LanguageTests {
     }
 }
 
+@Suite
+struct Qwen3AudioSegmenterTests {
+
+    private func tone(seconds: Double, level: Float = 0.5) -> [Float] {
+        [Float](repeating: level, count: Int(seconds * 16000))
+    }
+
+    @Test("audio inside the window is left whole")
+    func shortAudioUntouched() {
+        let samples = tone(seconds: 10)
+        let segments = MuesliQwen3AudioSegmenter.segments(samples)
+        #expect(segments.count == 1)
+        #expect(segments[0].count == samples.count)
+    }
+
+    @Test("empty audio yields no segments")
+    func emptyAudio() {
+        #expect(MuesliQwen3AudioSegmenter.segments([]).isEmpty)
+    }
+
+    @Test("long audio is split into acceptable pieces that lose nothing")
+    func longAudioSplit() {
+        let samples = tone(seconds: 95)
+        let segments = MuesliQwen3AudioSegmenter.segments(samples)
+        #expect(segments.count >= 4)
+        for segment in segments {
+            #expect(segment.count <= Int(MuesliQwen3AudioSegmenter.usableSeconds * 16000))
+            #expect(!segment.isEmpty)
+        }
+        // Every sample survives exactly once: no gaps, no duplication.
+        #expect(segments.reduce(0) { $0 + $1.count } == samples.count)
+    }
+
+    @Test("cuts prefer a silent gap over the hard boundary")
+    func cutsFallInSilence() {
+        // Loud up to 18s, silent for a second, loud again: the cut belongs in the gap.
+        var samples = tone(seconds: 18)
+        samples += [Float](repeating: 0, count: 16000)
+        samples += tone(seconds: 12)
+
+        let segments = MuesliQwen3AudioSegmenter.segments(samples)
+        #expect(segments.count == 2)
+        let cut = segments[0].count
+        #expect(cut > 18 * 16000)
+        #expect(cut < 19 * 16000)
+    }
+
+    @Test("audio stays under the model's own hard ceiling")
+    func usableWindowLeavesRoomForText() {
+        #expect(MuesliQwen3AudioSegmenter.usableSeconds < MuesliQwen3AsrConfig.maxAudioSeconds)
+    }
+}
+
+@Suite
 struct Qwen3LanguageSelectionTests {
 
     @available(macOS 15, *)

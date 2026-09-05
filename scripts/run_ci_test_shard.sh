@@ -57,6 +57,8 @@ case "${shard}" in
       Nemotron35BackendMetadataTests
       Nemotron35LanguageTests
       WhisperKitLanguageTests
+      SpeechRegionTrimmerTests
+      WhisperSilenceHallucinationFilterTests
       SpeechSegmentTests
       SpeechTranscriptionResultTests
       TranscriptionCoordinatorTests
@@ -74,6 +76,10 @@ case "${shard}" in
       DictationStateIdleTests
       DictationCorrectionMonitorTests
       Nemotron35ModelStoreTests
+      Qwen3VendorTests
+      Qwen3LanguageTests
+      Qwen3LanguageSelectionTests
+      Qwen3AudioSegmenterTests
     )
     ;;
   meetings)

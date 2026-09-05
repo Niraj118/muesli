@@ -2380,6 +2380,23 @@ struct HotkeyConfigTests {
         #expect(config.label == "Right Option")
     }
 
+    @Test("fn and Space are usable as a combination")
+    func functionSpaceCombination() {
+        let config = HotkeyConfig.combination(modifiers: [.function], keyCode: 49)
+        #expect(config.isCombination)
+        #expect(config.combinationKeyCode == 49)
+        #expect(config.resolvedCombinationModifiers == [.function])
+        #expect(config.label == "fn Space")
+        #expect(HotkeyConfig.combinationKeyLabel(for: 49) == "Space")
+    }
+
+    @Test("letter combinations keep their compact symbol label")
+    func letterCombinationLabelUnchanged() {
+        let config = HotkeyConfig.combination(modifiers: [.command, .shift], keyCode: 15)
+        #expect(config.label == "⌘⇧R")
+        #expect(config.label == HotkeyConfig.meetingRecordingDefault.label)
+    }
+
     @Test("computer use default is Right Cmd")
     func computerUseDefaultConfig() {
         let config = HotkeyConfig.computerUseDefault

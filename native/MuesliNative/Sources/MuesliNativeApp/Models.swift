@@ -409,13 +409,7 @@ enum Qwen3AsrLanguage: Hashable, Sendable {
     static var defaultLanguage: Self { systemLanguage }
 
     /// The Mac's current language when Qwen3-ASR supports it, English otherwise.
-    static let systemLanguage: Self = {
-        if let code = Locale.current.language.languageCode?.identifier,
-           let language = MuesliQwen3AsrConfig.Language(rawValue: code.lowercased()) {
-            return .pinned(language)
-        }
-        return .pinned(.english)
-    }()
+    static let systemLanguage: Self = .pinned(MuesliQwen3AsrSystemLanguage.current)
 
     static var allCases: [Qwen3AsrLanguage] {
         [.auto] + MuesliQwen3AsrConfig.Language.allCases.map(Qwen3AsrLanguage.pinned)
@@ -1195,15 +1189,27 @@ struct HotkeyConfig: Codable, Equatable {
         return letters[keyCode]
     }
 
+    /// Keys usable as the non-modifier half of a combination.
+    static func combinationKeyLabel(for keyCode: UInt16) -> String? {
+        if let letter = letterLabel(for: keyCode) { return letter }
+        return keyCode == 49 ? "Space" : nil
+    }
+
     static func combinationLabel(modifiers: NSEvent.ModifierFlags, keyCode: UInt16) -> String {
         let modifiers = supportedCombinationModifiers(from: modifiers)
         var parts: [String] = []
+        if modifiers.contains(.function) { parts.append("fn") }
         if modifiers.contains(.command) { parts.append("⌘") }
         if modifiers.contains(.control) { parts.append("⌃") }
         if modifiers.contains(.option) { parts.append("⌥") }
         if modifiers.contains(.shift) { parts.append("⇧") }
-        parts.append(letterLabel(for: keyCode) ?? "?")
-        return parts.joined()
+        let key = combinationKeyLabel(for: keyCode) ?? "?"
+        let prefix = parts.joined()
+        // Word-shaped names ("fn", "Space") need a gap; symbol runs like ⌘⇧R do not.
+        if !prefix.isEmpty, prefix.last?.isLetter == true || key.count > 1 {
+            return prefix + " " + key
+        }
+        return prefix + key
     }
 
     static func combination(modifiers: NSEvent.ModifierFlags, keyCode: UInt16) -> HotkeyConfig {
@@ -1218,7 +1224,7 @@ struct HotkeyConfig: Codable, Equatable {
     }
 
     static func supportedCombinationModifiers(from modifiers: NSEvent.ModifierFlags) -> NSEvent.ModifierFlags {
-        modifiers.intersection([.command, .control, .option, .shift])
+        modifiers.intersection([.command, .control, .option, .shift, .function])
     }
 
     var resolvedCombinationModifiers: NSEvent.ModifierFlags? {
@@ -1278,6 +1284,10 @@ struct AppConfig: Codable {
     var dictationHotkey: HotkeyConfig = .default
     var computerUseHotkey: HotkeyConfig = .computerUseDefault
     var enableComputerUseHotkey: Bool = false
+    /// Tapped while the push-to-talk key is held to switch that press into a
+    /// hands-free session. Sharing the push-to-talk key is deliberate: two
+    /// independent shortcuts over the same modifier fight each other.
+    var handsFreeKeyCode: UInt16 = 49
     var meetingRecordingHotkey: HotkeyConfig = .meetingRecordingDefault
     var enableMeetingRecordingHotkey: Bool = false
     var computerUseHotkeyDefaultDisabledMigrationApplied: Bool = true
@@ -1405,6 +1415,7 @@ struct AppConfig: Codable {
         case dictationHotkey = "dictation_hotkey"
         case computerUseHotkey = "computer_use_hotkey"
         case enableComputerUseHotkey = "enable_computer_use_hotkey"
+        case handsFreeKeyCode = "hands_free_key_code"
         case meetingRecordingHotkey = "meeting_recording_hotkey"
         case enableMeetingRecordingHotkey = "enable_meeting_recording_hotkey"
         case computerUseHotkeyDefaultDisabledMigrationApplied = "computer_use_hotkey_default_disabled_migration_applied"
@@ -1537,6 +1548,7 @@ struct AppConfig: Codable {
             ? ((try? c.decode(Bool.self, forKey: .enableComputerUseHotkey)) ?? defaults.enableComputerUseHotkey)
             : false
         computerUseHotkeyDefaultDisabledMigrationApplied = true
+        handsFreeKeyCode = (try? c.decode(UInt16.self, forKey: .handsFreeKeyCode)) ?? defaults.handsFreeKeyCode
         meetingRecordingHotkey = (try? c.decode(HotkeyConfig.self, forKey: .meetingRecordingHotkey)) ?? defaults.meetingRecordingHotkey
         enableMeetingRecordingHotkey = (try? c.decode(Bool.self, forKey: .enableMeetingRecordingHotkey)) ?? defaults.enableMeetingRecordingHotkey
         enableComputerUsePlanner = (try? c.decode(Bool.self, forKey: .enableComputerUsePlanner)) ?? defaults.enableComputerUsePlanner
