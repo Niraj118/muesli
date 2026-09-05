@@ -135,7 +135,11 @@ struct OnboardingView: View {
         _currentStep = State(initialValue: effectiveInitialStep)
         _userName = State(initialValue: initialUserName)
         _selectedUseCase = State(initialValue: initialUseCase)
-        let sanitizedInitialBackend = BackendOption.onboarding.contains(initialBackend)
+        // Permission repair resumes with the user's real model, which may not be
+        // in the curated first-run list (Whisper Large Turbo, for example). Keep
+        // any model that is already downloaded rather than silently swapping it
+        // for the first-run default, which Finish would then write to settings.
+        let sanitizedInitialBackend = BackendOption.onboarding.contains(initialBackend) || initialBackend.isDownloaded
             ? initialBackend
             : BackendOption.onboardingDefault
         _selectedBackend = State(initialValue: sanitizedInitialBackend)
