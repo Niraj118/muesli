@@ -969,6 +969,22 @@ final class CoreAudioDeviceInspector: CoreAudioDeviceInspecting {
 }
 
 enum AudioInputDeviceSelection {
+    /// Whether the device can also play audio. Apple's voice processing needs
+    /// an input and an output on one device, so an input-only device (the
+    /// built-in microphone) cannot host it.
+    static func deviceHasOutputStreams(_ deviceID: AudioObjectID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize) == noErr else {
+            return false
+        }
+        return dataSize >= UInt32(MemoryLayout<AudioObjectID>.size)
+    }
+
     static func applyPreferredInputDeviceID(
         _ preferredInputDeviceID: AudioObjectID?,
         to engine: AVAudioEngine,

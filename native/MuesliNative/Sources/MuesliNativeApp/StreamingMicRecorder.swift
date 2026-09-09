@@ -70,6 +70,10 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
     /// echo cancellation and automatic gain) before the tap sees it. Dictation
     /// turns this on so Whisper gets a cleaned-up voice in noisy rooms.
     let enablesVoiceProcessing: Bool
+    /// True once voice processing is switched on for the current graph. The
+    /// tap uses it to keep only the first of the identical channels the
+    /// voice-processing unit reports.
+    private var isVoiceProcessingActive = false
     private let graphLock = NSRecursiveLock()
     /// Published independently of graphLock: invalidateForTeardown() must land
     /// even while a worker is blocked in engine startup holding graphLock, so
@@ -140,9 +144,7 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
         emitLatency("app_scoped_prepare_begin")
         // Voice processing swaps the engine's IO unit, so it must be switched on
         // before the preferred device is applied and the input format is read.
-        if enablesVoiceProcessing {
-            applyVoiceProcessingLocked()
-        }
+        isVoiceProcessingActive = enablesVoiceProcessing && configureVoiceProcessingLocked()
         if recoversFromInputConfigurationChanges {
             if let preferredInputDeviceID,
                let error = MuesliAudioGraphSetInputDevice(engine, preferredInputDeviceID) {
@@ -175,11 +177,26 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
         emitLatency("app_scoped_prepare_end")
     }
 
-    /// Switches on Apple's voice processing for the input node. Failure is not
-    /// fatal: the engine still captures the raw microphone, exactly as before.
-    private func applyVoiceProcessingLocked() {
+    /// Switches Apple's voice processing on (or off) for the input node and
+    /// reports whether it is active. Failure is not fatal: the engine still
+    /// captures the raw microphone, exactly as before.
+    ///
+    /// Voice processing binds the microphone and the output on one device, so
+    /// an input-only device (the built-in microphone while headphones play)
+    /// cannot host it: the engine would refuse to start. Those routes capture
+    /// raw audio through the chosen device instead.
+    private func configureVoiceProcessingLocked() -> Bool {
         let inputNode = engine.inputNode
-        guard !inputNode.isVoiceProcessingEnabled else { return }
+        if let preferredInputDeviceID,
+           !AudioInputDeviceSelection.deviceHasOutputStreams(preferredInputDeviceID) {
+            if inputNode.isVoiceProcessingEnabled {
+                try? inputNode.setVoiceProcessingEnabled(false)
+            }
+            emitLatency("app_scoped_voice_processing_skipped:input_only_device")
+            fputs("[streaming-mic] voice processing skipped: input device \(preferredInputDeviceID) has no output side, capturing raw microphone\n", stderr)
+            return false
+        }
+        guard !inputNode.isVoiceProcessingEnabled else { return true }
         do {
             try inputNode.setVoiceProcessingEnabled(true)
             // Only the microphone needs cleaning; leave other apps' audio alone.
@@ -189,10 +206,24 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
             )
             emitLatency("app_scoped_voice_processing_enabled")
             fputs("[streaming-mic] voice processing enabled for microphone capture\n", stderr)
+            return true
         } catch {
             emitLatency("app_scoped_voice_processing_failed")
             fputs("[streaming-mic] voice processing unavailable, capturing raw microphone: \(error)\n", stderr)
+            return false
         }
+    }
+
+    /// Copies the first channel of `buffer` into a mono buffer of `format`.
+    private static func firstChannelBuffer(from buffer: AVAudioPCMBuffer, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        guard let source = buffer.floatChannelData,
+              let mono = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: buffer.frameLength),
+              let destination = mono.floatChannelData else {
+            return nil
+        }
+        destination[0].update(from: source[0], count: Int(buffer.frameLength))
+        mono.frameLength = buffer.frameLength
+        return mono
     }
 
     func start() throws {
@@ -274,10 +305,26 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
             ])
         }
 
+        // Voice processing reports several identical channels; keep the first
+        // so the converter never mixes them.
+        let takesFirstChannelOnly = isVoiceProcessingActive && hwFormat.channelCount > 1
+        let sourceFormat: AVAudioFormat
+        if takesFirstChannelOnly,
+           let monoFormat = AVAudioFormat(
+               commonFormat: .pcmFormatFloat32,
+               sampleRate: hwFormat.sampleRate,
+               channels: 1,
+               interleaved: false
+           ) {
+            sourceFormat = monoFormat
+        } else {
+            sourceFormat = hwFormat
+        }
+
         // Install converter if sample rates differ
-        let needsConversion = hwFormat.sampleRate != Self.sampleRate || hwFormat.channelCount != 1
+        let needsConversion = sourceFormat.sampleRate != Self.sampleRate || sourceFormat.channelCount != 1
         let converter: AVAudioConverter? = needsConversion
-            ? AVAudioConverter(from: hwFormat, to: targetFormat)
+            ? AVAudioConverter(from: sourceFormat, to: targetFormat)
             : nil
 
         emitLatency("app_scoped_tap_install_begin")
@@ -285,10 +332,24 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
             guard let self else { return }
             guard self.isCurrentRecording(recordingID) else { return }
 
+            let sourceBuffer: AVAudioPCMBuffer
+            if takesFirstChannelOnly, sourceFormat.channelCount != buffer.format.channelCount {
+                guard let firstChannel = Self.firstChannelBuffer(from: buffer, format: sourceFormat) else {
+                    self.reportRecordingFailure(
+                        Self.runtimeError(code: 4, message: "Could not allocate mono microphone buffer"),
+                        recordingID: recordingID
+                    )
+                    return
+                }
+                sourceBuffer = firstChannel
+            } else {
+                sourceBuffer = buffer
+            }
+
             let monoBuffer: AVAudioPCMBuffer
             if let converter {
                 let frameCapacity = AVAudioFrameCount(
-                    Double(buffer.frameLength) * Self.sampleRate / buffer.format.sampleRate
+                    Double(sourceBuffer.frameLength) * Self.sampleRate / sourceBuffer.format.sampleRate
                 )
                 guard let converted = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCapacity) else {
                     self.reportRecordingFailure(
@@ -306,7 +367,7 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
                     }
                     didProvideInput = true
                     outStatus.pointee = .haveData
-                    return buffer
+                    return sourceBuffer
                 }
                 converter.convert(to: converted, error: &error, withInputFrom: inputBlock)
                 if let error {
@@ -315,7 +376,7 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
                 }
                 monoBuffer = converted
             } else {
-                monoBuffer = buffer
+                monoBuffer = sourceBuffer
             }
 
             guard let floatData = monoBuffer.floatChannelData?[0] else {
