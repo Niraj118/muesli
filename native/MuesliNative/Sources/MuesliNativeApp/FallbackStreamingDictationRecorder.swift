@@ -40,6 +40,20 @@ final class FallbackStreamingDictationRecorder: StreamingDictationRecording, Str
         wireCallbacks()
     }
 
+    /// The microphone chain every dictation path shares. Apple's voice
+    /// processing (noise suppression, echo cancellation, automatic gain) runs
+    /// first so speech models get a cleaned-up voice in noisy rooms; the raw
+    /// Audio Queue capture remains as the fallback if that engine cannot start.
+    static func dictationMicrophone(directoryName: String) -> FallbackStreamingDictationRecorder {
+        FallbackStreamingDictationRecorder(
+            primary: StreamingMicRecorder(directoryName: directoryName, enablesVoiceProcessing: true),
+            fallback: AudioQueueInputRecorder(directoryName: directoryName)
+        )
+    }
+
+    var primaryRecorderForDebug: StreamingDictationRecording { primary }
+    var fallbackRecorderForDebug: StreamingDictationRecording { fallback }
+
     func prepare() throws {
         lock.lock()
         defer { lock.unlock() }

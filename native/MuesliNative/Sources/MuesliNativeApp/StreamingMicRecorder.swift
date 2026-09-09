@@ -66,6 +66,10 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
     private let engine = AVAudioEngine()
     private let directoryName: String
     private let recoversFromInputConfigurationChanges: Bool
+    /// Runs the microphone through Apple's voice processing (noise suppression,
+    /// echo cancellation and automatic gain) before the tap sees it. Dictation
+    /// turns this on so Whisper gets a cleaned-up voice in noisy rooms.
+    let enablesVoiceProcessing: Bool
     private let graphLock = NSRecursiveLock()
     /// Published independently of graphLock: invalidateForTeardown() must land
     /// even while a worker is blocked in engine startup holding graphLock, so
@@ -99,10 +103,12 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
 
     init(
         directoryName: String = "muesli-meeting-mic",
-        recoversFromInputConfigurationChanges: Bool = false
+        recoversFromInputConfigurationChanges: Bool = false,
+        enablesVoiceProcessing: Bool = false
     ) {
         self.directoryName = directoryName
         self.recoversFromInputConfigurationChanges = recoversFromInputConfigurationChanges
+        self.enablesVoiceProcessing = enablesVoiceProcessing
     }
 
     deinit {
@@ -132,6 +138,11 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
         }
 
         emitLatency("app_scoped_prepare_begin")
+        // Voice processing swaps the engine's IO unit, so it must be switched on
+        // before the preferred device is applied and the input format is read.
+        if enablesVoiceProcessing {
+            applyVoiceProcessingLocked()
+        }
         if recoversFromInputConfigurationChanges {
             if let preferredInputDeviceID,
                let error = MuesliAudioGraphSetInputDevice(engine, preferredInputDeviceID) {
@@ -162,6 +173,26 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
         isGraphPrepared = true
         graphPreparedInputDeviceID = preferredInputDeviceID
         emitLatency("app_scoped_prepare_end")
+    }
+
+    /// Switches on Apple's voice processing for the input node. Failure is not
+    /// fatal: the engine still captures the raw microphone, exactly as before.
+    private func applyVoiceProcessingLocked() {
+        let inputNode = engine.inputNode
+        guard !inputNode.isVoiceProcessingEnabled else { return }
+        do {
+            try inputNode.setVoiceProcessingEnabled(true)
+            // Only the microphone needs cleaning; leave other apps' audio alone.
+            inputNode.voiceProcessingOtherAudioDuckingConfiguration = AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
+                enableAdvancedDucking: false,
+                duckingLevel: .min
+            )
+            emitLatency("app_scoped_voice_processing_enabled")
+            fputs("[streaming-mic] voice processing enabled for microphone capture\n", stderr)
+        } catch {
+            emitLatency("app_scoped_voice_processing_failed")
+            fputs("[streaming-mic] voice processing unavailable, capturing raw microphone: \(error)\n", stderr)
+        }
     }
 
     func start() throws {

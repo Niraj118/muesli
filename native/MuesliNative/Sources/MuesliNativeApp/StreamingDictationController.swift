@@ -65,9 +65,8 @@ final class StreamingDictationController {
     init(
         transcriber: NemotronStreamingTranscribing,
         preferredInputDeviceID: AudioObjectID? = nil,
-        recorder: StreamingDictationRecording = FallbackStreamingDictationRecorder(
-            primary: AudioQueueInputRecorder(directoryName: "muesli-native-dictation-streaming"),
-            fallback: StreamingMicRecorder(directoryName: "muesli-native-dictation-streaming")
+        recorder: StreamingDictationRecording = FallbackStreamingDictationRecorder.dictationMicrophone(
+            directoryName: "muesli-native-dictation-streaming"
         ),
         stopStreamStateTimeout: TimeInterval = 1.0,
         stopDrainTimeout: TimeInterval? = nil,

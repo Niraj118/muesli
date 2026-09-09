@@ -90,9 +90,8 @@ final class AppScopedDictationRecorder: DictationAudioRecording {
     }
 
     init(
-        recorder: StreamingDictationRecording = FallbackStreamingDictationRecorder(
-            primary: AudioQueueInputRecorder(directoryName: "muesli-native-dictation"),
-            fallback: StreamingMicRecorder(directoryName: "muesli-native-dictation")
+        recorder: StreamingDictationRecording = FallbackStreamingDictationRecorder.dictationMicrophone(
+            directoryName: "muesli-native-dictation"
         ),
         prepareQueue: DispatchQueue = DispatchQueue(label: "com.muesli.app-scoped-dictation-recorder-prepare"),
         recorderQueue: DispatchQueue = DispatchQueue(label: "com.muesli.app-scoped-dictation-recorder-child"),
@@ -281,9 +280,9 @@ final class AppScopedDictationRecorder: DictationAudioRecording {
         lock.unlock()
         return recorderQueue.sync {
             // Stop IO and finalize the WAV, but keep the prepared capture
-            // graph alive: AudioQueueInputRecorder.stop() retains the queue,
-            // so the next start() is AudioQueueStart on the existing graph
-            // instead of a full rebuild. The graph is only torn down on
+            // graph alive: StreamingMicRecorder.stop() keeps the prepared
+            // engine and AudioQueueInputRecorder.stop() retains the queue, so
+            // the next start() reuses the existing graph instead of a full rebuild. The graph is only torn down on
             // cancel() (proven failure / explicit invalidation).
             recorder.stop()
         }
