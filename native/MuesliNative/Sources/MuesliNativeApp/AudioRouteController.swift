@@ -58,13 +58,30 @@ enum AudioRouteClassifier {
     struct Classification: Equatable {
         let kind: AudioOutputRouteKind
         let isAmbiguousBluetooth: Bool
+        /// The output travels over Bluetooth. Bluetooth headsets drop to a
+        /// low-quality phone-call mode when their own microphone is used, so
+        /// dictation keeps the built-in microphone for them. Wired and USB
+        /// headsets have no such penalty and follow the system default input.
+        let isBluetooth: Bool
+
+        init(kind: AudioOutputRouteKind, isAmbiguousBluetooth: Bool, isBluetooth: Bool = false) {
+            self.kind = kind
+            self.isAmbiguousBluetooth = isAmbiguousBluetooth
+            self.isBluetooth = isBluetooth
+        }
     }
 
     static func outputRouteClassification(for device: AudioOutputDeviceDescription) -> Classification {
         Classification(
             kind: outputRouteKind(for: device),
-            isAmbiguousBluetooth: isAmbiguousBluetoothWithoutRouteMetadata(device)
+            isAmbiguousBluetooth: isAmbiguousBluetoothWithoutRouteMetadata(device),
+            isBluetooth: isBluetoothTransport(device)
         )
+    }
+
+    private static func isBluetoothTransport(_ device: AudioOutputDeviceDescription) -> Bool {
+        device.transportType == kAudioDeviceTransportTypeBluetooth
+            || device.transportType == kAudioDeviceTransportTypeBluetoothLE
     }
 
     static func outputRouteKind(for device: AudioOutputDeviceDescription) -> AudioOutputRouteKind {
@@ -162,6 +179,7 @@ final class DictationAudioRouteController: DictationAudioRouting {
     private struct RouteSnapshot {
         var outputRouteKind: AudioOutputRouteKind = .unknown
         var outputIsAmbiguousBluetooth: Bool = false
+        var outputIsBluetooth: Bool = false
         var builtInInputDeviceID: AudioObjectID?
         var defaultInputDeviceID: AudioObjectID?
         var selectedInputDeviceID: AudioObjectID?
@@ -250,6 +268,7 @@ final class DictationAudioRouteController: DictationAudioRouting {
         self.snapshot = RouteSnapshot(
             outputRouteKind: initialOutputClassification?.kind ?? .unknown,
             outputIsAmbiguousBluetooth: initialOutputClassification?.isAmbiguousBluetooth ?? false,
+            outputIsBluetooth: initialOutputClassification?.isBluetooth ?? false,
             builtInInputDeviceID: inspector.builtInInputDeviceID(),
             defaultInputDeviceID: inspector.defaultInputDeviceID(),
             selectedInputDeviceID: nil,
@@ -418,7 +437,10 @@ final class DictationAudioRouteController: DictationAudioRouting {
         }
         switch snapshot.outputRouteKind {
         case .headphoneLike:
-            return snapshot.builtInInputDeviceID
+            // Only Bluetooth headsets pay a quality penalty for using their own
+            // microphone. Wired and USB headsets keep the microphone the Mac is
+            // already using, which is usually the headset's own boom mic.
+            return snapshot.outputIsBluetooth ? snapshot.builtInInputDeviceID : nil
         case .speakerLike:
             return nil
         case .unknown:
@@ -480,6 +502,7 @@ final class DictationAudioRouteController: DictationAudioRouting {
         return RouteSnapshot(
             outputRouteKind: outputClassification.kind,
             outputIsAmbiguousBluetooth: outputClassification.isAmbiguousBluetooth,
+            outputIsBluetooth: outputClassification.isBluetooth,
             builtInInputDeviceID: inspector.builtInInputDeviceID(),
             defaultInputDeviceID: inspector.defaultInputDeviceID(),
             selectedInputDeviceID: selectedInputDeviceID,

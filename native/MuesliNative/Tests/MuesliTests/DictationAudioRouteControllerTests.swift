@@ -4,11 +4,12 @@ import Testing
 
 @Suite("DictationAudioRouteController")
 struct DictationAudioRouteControllerTests {
-    @Test("dictation prefers built-in mic for headphone output")
-    func dictationPrefersBuiltInMicForHeadphoneOutput() {
+    @Test("dictation prefers built-in mic for Bluetooth headphone output")
+    func dictationPrefersBuiltInMicForBluetoothHeadphoneOutput() {
         let inspector = FakeCoreAudioDeviceInspector(
             defaultOutputDeviceID: 10,
             outputRouteKind: .headphoneLike,
+            outputIsBluetooth: true,
             builtInInputDeviceID: 82
         )
         let controller = DictationAudioRouteController(
@@ -19,6 +20,24 @@ struct DictationAudioRouteControllerTests {
 
         #expect(controller.preferredInputDeviceIDForDictation() == 82)
         #expect(controller.cachedPreferredInputDeviceIDForDictation() == 82)
+    }
+
+    @Test("dictation follows the system default input for wired or USB headphones")
+    func dictationFollowsSystemDefaultInputForWiredHeadphoneOutput() {
+        let inspector = FakeCoreAudioDeviceInspector(
+            defaultOutputDeviceID: 10,
+            outputRouteKind: .headphoneLike,
+            defaultInputDeviceID: 97,
+            builtInInputDeviceID: 82
+        )
+        let controller = DictationAudioRouteController(
+            inspector: inspector,
+            queue: DispatchQueue(label: "test.dictation-audio-route.wired-headphone-like"),
+            observesDefaultOutputChanges: false
+        )
+
+        #expect(controller.preferredInputDeviceIDForDictation() == nil)
+        #expect(controller.cachedPreferredInputDeviceIDForDictation() == nil)
     }
 
     @Test("meeting reuses route-aware preferred input policy")
@@ -399,6 +418,7 @@ struct DictationAudioRouteControllerTests {
         let inspector = FakeCoreAudioDeviceInspector(
             defaultOutputDeviceID: 10,
             outputRouteKind: .headphoneLike,
+            outputIsBluetooth: true,
             builtInInputDeviceID: 82,
             inputDevices: [
                 AudioInputDeviceInfo(uid: "built-in-mic", name: "MacBook Microphone", deviceID: 82, isBuiltIn: true),
@@ -466,6 +486,7 @@ private final class FakeCoreAudioDeviceInspector: CoreAudioDeviceInspecting {
     var defaultInputDeviceIDValue: AudioObjectID?
     var outputRouteKindValue: AudioOutputRouteKind
     var outputIsAmbiguousBluetoothValue: Bool
+    var outputIsBluetoothValue: Bool
     var builtInInputDeviceIDValue: AudioObjectID?
     var inputDevices: [AudioInputDeviceInfo]
     private(set) var inspectionCallCount = 0
@@ -474,6 +495,7 @@ private final class FakeCoreAudioDeviceInspector: CoreAudioDeviceInspecting {
         defaultOutputDeviceID: AudioObjectID?,
         outputRouteKind: AudioOutputRouteKind,
         outputIsAmbiguousBluetooth: Bool = false,
+        outputIsBluetooth: Bool = false,
         defaultInputDeviceID: AudioObjectID? = nil,
         builtInInputDeviceID: AudioObjectID?,
         inputDevices: [AudioInputDeviceInfo] = []
@@ -482,6 +504,7 @@ private final class FakeCoreAudioDeviceInspector: CoreAudioDeviceInspecting {
         self.defaultInputDeviceIDValue = defaultInputDeviceID
         self.outputRouteKindValue = outputRouteKind
         self.outputIsAmbiguousBluetoothValue = outputIsAmbiguousBluetooth
+        self.outputIsBluetoothValue = outputIsBluetooth
         self.builtInInputDeviceIDValue = builtInInputDeviceID
         self.inputDevices = inputDevices
     }
@@ -523,7 +546,8 @@ private final class FakeCoreAudioDeviceInspector: CoreAudioDeviceInspecting {
         inspectionCallCount += 1
         return AudioRouteClassifier.Classification(
             kind: outputRouteKindValue,
-            isAmbiguousBluetooth: outputIsAmbiguousBluetoothValue
+            isAmbiguousBluetooth: outputIsAmbiguousBluetoothValue,
+            isBluetooth: outputIsBluetoothValue
         )
     }
 
