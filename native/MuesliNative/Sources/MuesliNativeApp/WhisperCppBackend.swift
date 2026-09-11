@@ -59,15 +59,17 @@ actor WhisperKitTranscriber {
     /// Transcribe a 16kHz mono WAV file.
     /// - Parameter language: `.auto` enables WhisperKit language detection; otherwise pins that ISO code.
     ///   Ignored for English-only `.en` models, which keep default English decoding.
+    /// - Parameter vocabularyHint: spellings to lean toward (see `WhisperVocabularyHint`).
     func transcribe(
         wavURL: URL,
-        language: WhisperKitLanguage = .defaultLanguage
+        language: WhisperKitLanguage = .defaultLanguage,
+        vocabularyHint: String? = nil
     ) async throws -> (text: String, processingTime: Double) {
         guard let whisperKit else { throw TranscriberError.notLoaded }
         guard let loadedModel else { throw TranscriberError.notLoaded }
 
         let start = CFAbsoluteTimeGetCurrent()
-        let decodeOptions = Self.makeDecodeOptions(language: language, modelName: loadedModel)
+        let decodeOptions = decodeOptions(language: language, modelName: loadedModel, vocabularyHint: vocabularyHint)
         let results = try await whisperKit.transcribe(audioPath: wavURL.path, decodeOptions: decodeOptions)
         return (text: Self.assembleText(results), processingTime: CFAbsoluteTimeGetCurrent() - start)
     }
@@ -76,13 +78,14 @@ actor WhisperKitTranscriber {
     /// (see `SpeechRegionTrimmer`), so Whisper never decodes a silent window.
     func transcribe(
         samples: [Float],
-        language: WhisperKitLanguage = .defaultLanguage
+        language: WhisperKitLanguage = .defaultLanguage,
+        vocabularyHint: String? = nil
     ) async throws -> (text: String, processingTime: Double) {
         guard let whisperKit else { throw TranscriberError.notLoaded }
         guard let loadedModel else { throw TranscriberError.notLoaded }
 
         let start = CFAbsoluteTimeGetCurrent()
-        let decodeOptions = Self.makeDecodeOptions(language: language, modelName: loadedModel)
+        let decodeOptions = decodeOptions(language: language, modelName: loadedModel, vocabularyHint: vocabularyHint)
         let results = try await whisperKit.transcribe(audioArray: samples, decodeOptions: decodeOptions)
         return (text: Self.assembleText(results), processingTime: CFAbsoluteTimeGetCurrent() - start)
     }
@@ -92,6 +95,23 @@ actor WhisperKitTranscriber {
         let joined = results.map(\.text).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return WhisperSilenceHallucinationFilter.apply(joined)
+    }
+
+    /// Decode options plus the dictionary hint. Whisper reads the hint as the
+    /// text spoken just before the recording, so it favours those spellings.
+    private func decodeOptions(
+        language: WhisperKitLanguage,
+        modelName: String,
+        vocabularyHint: String?
+    ) -> DecodingOptions {
+        var options = Self.makeDecodeOptions(language: language, modelName: modelName)
+        guard let vocabularyHint, let tokenizer = whisperKit?.tokenizer else { return options }
+        let tokens = tokenizer.encode(text: " " + vocabularyHint)
+            .filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+        if !tokens.isEmpty {
+            options.promptTokens = tokens
+        }
+        return options
     }
 
     /// Build WhisperKit decode options for the loaded model.

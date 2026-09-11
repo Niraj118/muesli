@@ -59,6 +59,7 @@ case "${shard}" in
       WhisperKitLanguageTests
       SpeechRegionTrimmerTests
       DictationMicrophoneCaptureTests
+      WhisperVocabularyHintTests
       WhisperSilenceHallucinationFilterTests
       SpeechSegmentTests
       SpeechTranscriptionResultTests

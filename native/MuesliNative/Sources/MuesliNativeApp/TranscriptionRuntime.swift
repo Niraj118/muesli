@@ -844,7 +844,8 @@ actor TranscriptionCoordinator {
             indicASRLanguage: indicASRLanguage,
             whisperLanguage: whisperLanguage,
             qwen3AsrLanguage: qwen3AsrLanguage,
-            appleSpeechLanguage: appleSpeechLanguage
+            appleSpeechLanguage: appleSpeechLanguage,
+            vocabularyHint: WhisperVocabularyHint.text(for: Self.customWordEntries(customWords))
         )
         result = removeArtifacts(result)
         if !result.text.isEmpty {
@@ -1239,13 +1240,17 @@ actor TranscriptionCoordinator {
         }
     }
 
-    private func applyCustomWords(_ result: SpeechTranscriptionResult, customWords: [[String: Any]]) -> SpeechTranscriptionResult {
-        guard !customWords.isEmpty, !result.text.isEmpty else { return result }
-        let entries = customWords.compactMap { dict -> CustomWord? in
+    private static func customWordEntries(_ customWords: [[String: Any]]) -> [CustomWord] {
+        customWords.compactMap { dict -> CustomWord? in
             guard let word = dict["word"] as? String else { return nil }
             let threshold = dict["matchingThreshold"] as? Double ?? 0.85
             return CustomWord(word: word, replacement: dict["replacement"] as? String, matchingThreshold: threshold)
         }
+    }
+
+    private func applyCustomWords(_ result: SpeechTranscriptionResult, customWords: [[String: Any]]) -> SpeechTranscriptionResult {
+        guard !customWords.isEmpty, !result.text.isEmpty else { return result }
+        let entries = Self.customWordEntries(customWords)
         guard !entries.isEmpty else { return result }
         let correctedText = CustomWordMatcher.apply(text: result.text, customWords: entries)
         return SpeechTranscriptionResult(text: correctedText, segments: result.segments)
@@ -1258,14 +1263,15 @@ actor TranscriptionCoordinator {
         indicASRLanguage: IndicASRLanguage,
         whisperLanguage: WhisperKitLanguage,
         qwen3AsrLanguage: Qwen3AsrLanguage,
-        appleSpeechLanguage: String
+        appleSpeechLanguage: String,
+        vocabularyHint: String? = nil
     ) async throws -> SpeechTranscriptionResult {
         switch backend.backend {
         case "whisper":
             let language = backend.supportsWhisperLanguageSelection
                 ? whisperLanguage
                 : WhisperKitLanguage.defaultLanguage
-            return try await transcribeWithWhisperKit(url: url, language: language)
+            return try await transcribeWithWhisperKit(url: url, language: language, vocabularyHint: vocabularyHint)
         case "nemotron35":
             return try await transcribeWithNemotron35(url: url)
         case "parakeet-unified":
@@ -1326,18 +1332,22 @@ actor TranscriptionCoordinator {
 
     private func transcribeWithWhisperKit(
         url: URL,
-        language: WhisperKitLanguage
+        language: WhisperKitLanguage,
+        vocabularyHint: String? = nil
     ) async throws -> SpeechTranscriptionResult {
         fputs("[muesli-native] transcribing with WhisperKit: \(url.lastPathComponent)\n", stderr)
+        if let vocabularyHint {
+            fputs("[muesli-native] WhisperKit vocabulary hint: \(vocabularyHint)\n", stderr)
+        }
         let result: (text: String, processingTime: Double)
         if let speech = await speechOnlyAudioForWhisper(url: url) {
             guard let samples = speech.samples else {
                 fputs("[muesli-native] VAD: recording has no speech, skipping WhisperKit\n", stderr)
                 return SpeechTranscriptionResult(text: "", segments: [])
             }
-            result = try await whisperTranscriber.transcribe(samples: samples, language: language)
+            result = try await whisperTranscriber.transcribe(samples: samples, language: language, vocabularyHint: vocabularyHint)
         } else {
-            result = try await whisperTranscriber.transcribe(wavURL: url, language: language)
+            result = try await whisperTranscriber.transcribe(wavURL: url, language: language, vocabularyHint: vocabularyHint)
         }
         fputs("[muesli-native] WhisperKit result: \(result.text.prefix(80)) (took \(String(format: "%.3f", result.processingTime))s)\n", stderr)
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
