@@ -169,6 +169,10 @@ final class StreamingMicRecorder: StreamingDictationRecording, StreamingDictatio
         }
         if recoversFromInputConfigurationChanges {
             if let error = MuesliAudioGraphPrepareEngine(engine) { throw error }
+        } else if isVoiceProcessingActive {
+            // An initialised voice-processing unit turns other apps' audio down
+            // for as long as it exists, so the idle graph is left uninitialised
+            // and `engine.start()` initialises it on demand (about 80 ms).
         } else {
             engine.prepare()
         }

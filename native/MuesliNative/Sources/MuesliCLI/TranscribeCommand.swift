@@ -256,6 +256,15 @@ protocol AudioPreparing {
 
 protocol AudioTranscribing {
     func transcribe(wavURL: URL, model: TranscribeModel, progress: @escaping (String) -> Void) async throws -> HeadlessTranscription
+    /// `vocabularyHint` is the dictionary's spellings for models that accept a
+    /// prompt (Whisper); other models ignore it.
+    func transcribe(wavURL: URL, model: TranscribeModel, vocabularyHint: String?, progress: @escaping (String) -> Void) async throws -> HeadlessTranscription
+}
+
+extension AudioTranscribing {
+    func transcribe(wavURL: URL, model: TranscribeModel, vocabularyHint: String?, progress: @escaping (String) -> Void) async throws -> HeadlessTranscription {
+        try await transcribe(wavURL: wavURL, model: model, progress: progress)
+    }
 }
 
 protocol MeetingSummarizing {
@@ -305,6 +314,7 @@ struct MuesliAudioTranscriptionPipeline {
         let transcription = try await transcriber.transcribe(
             wavURL: prepared.wavURL,
             model: request.model,
+            vocabularyHint: customWords.flatMap { WhisperVocabularyHint.text(for: $0) },
             progress: { message in
                 fputs("[muesli-cli] \(message)\n", stderr)
             }
@@ -625,6 +635,10 @@ struct RoutingAudioTranscriber: AudioTranscribing {
     var whisper: AudioTranscribing = WhisperCLITranscriber()
 
     func transcribe(wavURL: URL, model: TranscribeModel, progress: @escaping (String) -> Void) async throws -> HeadlessTranscription {
+        try await transcribe(wavURL: wavURL, model: model, vocabularyHint: nil, progress: progress)
+    }
+
+    func transcribe(wavURL: URL, model: TranscribeModel, vocabularyHint: String?, progress: @escaping (String) -> Void) async throws -> HeadlessTranscription {
         let transcriber: AudioTranscribing
         switch model {
         case .parakeetV3, .parakeetV2: transcriber = batch
@@ -638,7 +652,7 @@ struct RoutingAudioTranscriber: AudioTranscribing {
              .whisperLargeTurbo:
             transcriber = whisper
         }
-        return try await transcriber.transcribe(wavURL: wavURL, model: model, progress: progress)
+        return try await transcriber.transcribe(wavURL: wavURL, model: model, vocabularyHint: vocabularyHint, progress: progress)
     }
 }
 
@@ -861,6 +875,10 @@ actor WhisperCLITranscriber: AudioTranscribing {
     private var vadUnavailable = false
 
     func transcribe(wavURL: URL, model: TranscribeModel, progress: @escaping (String) -> Void) async throws -> HeadlessTranscription {
+        try await transcribe(wavURL: wavURL, model: model, vocabularyHint: nil, progress: progress)
+    }
+
+    func transcribe(wavURL: URL, model: TranscribeModel, vocabularyHint: String?, progress: @escaping (String) -> Void) async throws -> HeadlessTranscription {
         guard let modelName = model.whisperKitModelName else {
             throw CLIError.invalidInput(
                 "\(model.rawValue) is not a Whisper model.",
@@ -874,11 +892,21 @@ actor WhisperCLITranscriber: AudioTranscribing {
         let start = CFAbsoluteTimeGetCurrent()
         // English-only `.en` checkpoints have no multilingual tokens — keep default DecodingOptions.
         // Multilingual variants need detectLanguage; WhisperKit defaults otherwise force English.
-        let decodeOptions: DecodingOptions
+        var decodeOptions: DecodingOptions
         if modelName.hasSuffix(".en") {
             decodeOptions = DecodingOptions()
         } else {
             decodeOptions = DecodingOptions(detectLanguage: true)
+        }
+        // Whisper reads the hint as the text spoken just before the recording
+        // and favours those spellings, the same nudge the app gives dictation.
+        if let vocabularyHint, let tokenizer = whisperKit.tokenizer {
+            let tokens = tokenizer.encode(text: " " + vocabularyHint)
+                .filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+            if !tokens.isEmpty {
+                decodeOptions.promptTokens = tokens
+                progress("vocabulary hint: \(vocabularyHint) (\(tokens.count) tokens)")
+            }
         }
         let results: [TranscriptionResult]
         if let speech = await speechOnlyAudio(wavURL: wavURL, progress: progress) {
