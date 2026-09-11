@@ -1875,6 +1875,40 @@ struct HotkeyMonitorTests {
         }
     }
 
+    @Test("no keys are swallowed while idle")
+    func noKeysSwallowedWhileIdle() {
+        let monitor = HotkeyMonitor()
+        monitor.handsFreeKeyCode = 49
+        #expect(!monitor.shouldSwallowKeyDown(53))
+        #expect(!monitor.shouldSwallowKeyDown(36))
+        #expect(!monitor.shouldSwallowKeyDown(76))
+        #expect(!monitor.shouldSwallowKeyDown(49))
+        #expect(!monitor.shouldSwallowKeyDown(0))
+    }
+
+    @Test("escape and the hands-free key are swallowed during a held dictation")
+    func escapeAndHandsFreeKeySwallowedDuringHold() {
+        let monitor = HotkeyMonitor()
+        monitor.handsFreeKeyCode = 49
+        monitor.setHoldRecordingActiveForTests()
+        #expect(monitor.shouldSwallowKeyDown(53))
+        #expect(monitor.shouldSwallowKeyDown(49))
+        #expect(!monitor.shouldSwallowKeyDown(36))
+        #expect(!monitor.shouldSwallowKeyDown(0))
+    }
+
+    @Test("escape and return are swallowed during hands-free dictation")
+    func escapeAndReturnSwallowedDuringHandsFree() {
+        let monitor = HotkeyMonitor()
+        monitor.handsFreeKeyCode = 49
+        monitor.setHandsFreeRecordingActiveForTests()
+        #expect(monitor.shouldSwallowKeyDown(53))
+        #expect(monitor.shouldSwallowKeyDown(36))
+        #expect(monitor.shouldSwallowKeyDown(76))
+        #expect(!monitor.shouldSwallowKeyDown(49))
+        #expect(!monitor.shouldSwallowKeyDown(0))
+    }
+
     @Test("escape still cancels active hold dictation immediately")
     func escapeCancelsActiveHoldDictation() async throws {
         let monitor = HotkeyMonitor(

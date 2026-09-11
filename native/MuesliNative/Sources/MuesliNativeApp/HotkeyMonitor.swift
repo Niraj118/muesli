@@ -135,11 +135,109 @@ final class HotkeyMonitor {
         } else {
             fputs("[hotkey] failed to start event monitors\n", stderr)
         }
+        startKeyInterceptor()
+    }
+
+    // MARK: - Key interception
+
+    /// NSEvent monitors only watch keys; whatever ends a dictation (Escape,
+    /// Return, the hands-free key) also lands in the app under the cursor. An
+    /// active event tap consumes exactly those presses while a session is
+    /// running and hands them to the same handler, so they never reach the app.
+    /// Everything else passes through untouched.
+    private var eventTap: CFMachPort?
+    private var eventTapSource: CFRunLoopSource?
+    private var swallowedKeyUps = Set<UInt16>()
+
+    private func startKeyInterceptor() {
+        guard eventTap == nil else { return }
+        let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
+        let callback: CGEventTapCallBack = { _, type, event, userInfo in
+            guard let userInfo else { return Unmanaged.passUnretained(event) }
+            let monitor = Unmanaged<HotkeyMonitor>.fromOpaque(userInfo).takeUnretainedValue()
+            return monitor.intercept(type: type, event: event)
+        }
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: CGEventMask(mask),
+            callback: callback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            fputs("[hotkey] key interception unavailable (no accessibility access); dictation keys will also reach the focused app\n", stderr)
+            return
+        }
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        eventTap = tap
+        eventTapSource = source
+        fputs("[hotkey] key interception started\n", stderr)
+    }
+
+    private func stopKeyInterceptor() {
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+        }
+        if let eventTapSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), eventTapSource, .commonModes)
+        }
+        eventTap = nil
+        eventTapSource = nil
+        swallowedKeyUps.removeAll()
+    }
+
+    /// Runs on the main run loop, where the tap's source lives.
+    private func intercept(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            // macOS switches a tap off if its callback ever stalls; switch it back on.
+            if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
+            return Unmanaged.passUnretained(event)
+        case .keyDown:
+            let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+            guard shouldSwallowKeyDown(keyCode) else { return Unmanaged.passUnretained(event) }
+            swallowedKeyUps.insert(keyCode)
+            if let nsEvent = NSEvent(cgEvent: event) {
+                handle(nsEvent)
+            }
+            return nil
+        case .keyUp:
+            let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+            guard swallowedKeyUps.remove(keyCode) != nil else { return Unmanaged.passUnretained(event) }
+            if let nsEvent = NSEvent(cgEvent: event) {
+                handle(nsEvent)
+            }
+            return nil
+        default:
+            return Unmanaged.passUnretained(event)
+        }
+    }
+
+    /// Which key presses are consumed instead of reaching the focused app:
+    /// Escape during any dictation session, Return/Enter while hands-free
+    /// dictation is running, and the hands-free key while the dictation key is
+    /// held. With no session running nothing is consumed.
+    func shouldSwallowKeyDown(_ keyCode: UInt16) -> Bool {
+        let sessionRunning = toggleActive || active || armed || prepared || targetKeyDown || combinationKeyDown
+        switch keyCode {
+        case 53:
+            return sessionRunning
+        case 36, 76:
+            return toggleActive
+        default:
+            if let handsFreeKeyCode, keyCode == handsFreeKeyCode {
+                return targetKeyDown && !toggleActive
+            }
+            return false
+        }
     }
 
     func stop() {
         finishActiveSessionBeforeReconfigure()
         cancelTimers()
+        stopKeyInterceptor()
         if let globalMonitor {
             NSEvent.removeMonitor(globalMonitor)
         }
@@ -732,6 +830,10 @@ final class HotkeyMonitor {
     func setHoldRecordingActiveForTests() {
         targetKeyDown = true
         active = true
+    }
+
+    func setHandsFreeRecordingActiveForTests() {
+        toggleActive = true
     }
 
     func shouldHandleLocalEventForTests(
